@@ -107,8 +107,8 @@ Here's what the pieces are and how they fit together:
 │  │  │  Red Hat AI Inference Server │  │  │
 │  │  │  (RHAIIS 3.5 / vLLM engine)  │  │  │
 │  │  │  ┌────────────────────────┐  │  │  │
-│  │  │  │ Granite 2B or Qwen 7B │  │  │  │
-│  │  │  │ (open-weight)         │  │  │  │
+│  │  │  │ Granite 2B or Qwen 7B  │  │  │  │
+│  │  │  │ (open-weight)          │  │  │  │
 │  │  │  └────────────────────────┘  │  │  │
 │  │  └──────────────────────────────┘  │  │
 │  │  API: localhost:8000               │  │
