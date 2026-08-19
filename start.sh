@@ -1,10 +1,9 @@
 #!/bin/bash
 # RHAIIS GPU Quickstart — One-click model serving
-# Pulls the Red Hat AI Inference Server, serves your chosen model on an NVIDIA GPU, runs your first call.
+# Pulls the Red Hat AI Inference Server, serves your chosen model on an NVIDIA or AMD GPU (auto-detected), runs your first call.
 
 set -e
 
-IMAGE="${IMAGE:-quay.io/aipcc/rhaiis/cuda-ubi9:3.5.0}"  # TODO: changed for testing! Switch back to registry.redhat.io image!!
 CACHE_DIR="${CACHE_DIR:-$HOME/rhaii-cache}"
 CONTAINER="inference-server"
 PORT=8000
@@ -24,6 +23,28 @@ ok()    { echo -e "${GREEN}✓${NC} $1"; }
 warn()  { echo -e "${YELLOW}!${NC} $1"; }
 fail()  { echo -e "${RED}✗${NC} $1"; exit 1; }
 header(){ echo -e "\n${BOLD}$1${NC}"; }
+
+# --- GPU vendor detection ---
+# Check kernel driver device nodes first, not vendor CLI tools — a vendor's
+# own CLI (e.g. nvidia-smi) can be present, on PATH, and exit 0 on a machine
+# that doesn't actually have that vendor's GPU or driver.
+if [ -e /dev/kfd ]; then
+    ACCEL="amd"
+elif compgen -G "/dev/nvidia[0-9]*" &>/dev/null; then
+    ACCEL="nvidia"
+elif command -v rocm-smi &>/dev/null && rocm-smi --showid &>/dev/null; then
+    ACCEL="amd"
+elif command -v nvidia-smi &>/dev/null && nvidia-smi -L 2>/dev/null | grep -q '^GPU '; then
+    ACCEL="nvidia"
+else
+    fail "No supported GPU found. Expected /dev/kfd (AMD) or /dev/nvidia* (NVIDIA) device nodes — install the matching driver and try again."
+fi
+
+if [ "$ACCEL" = "nvidia" ]; then
+    IMAGE="${IMAGE:-quay.io/aipcc/rhaiis/cuda-ubi9:3.5.0}"  # TODO: changed for testing! Switch back to registry.redhat.io image!!
+else
+    IMAGE="${IMAGE:-quay.io/aipcc/rhaiis/rocm-ubi9:3.4.4}"  # TODO: changed for testing! Switch back to registry.redhat.io image!!
+fi
 
 # --- Model selection ---
 if [ -z "$MODEL" ]; then
@@ -83,14 +104,27 @@ ok "Container runtime: $RUNTIME"
 
 # OS check — warn on macOS
 if [ "$(uname -s)" = "Darwin" ]; then
-    warn "macOS detected. The RHAIIS container requires Linux (RHEL, Fedora, Ubuntu) with an NVIDIA GPU. It will not run natively on macOS."
+    warn "macOS detected. The RHAIIS container requires Linux (RHEL, Fedora, Ubuntu) with an NVIDIA or AMD GPU. It will not run natively on macOS."
 fi
 
-# NVIDIA GPU + driver
-command -v nvidia-smi &>/dev/null || fail "nvidia-smi not found. Install the NVIDIA driver and NVIDIA Container Toolkit and try again."
+ok "Accelerator: $([ "$ACCEL" = "nvidia" ] && echo NVIDIA || echo AMD)"
 
-GPU_COUNT=$(nvidia-smi --query-gpu=count --format=csv,noheader,nounits 2>/dev/null | head -1)
-VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | sort -n | tail -1)
+if [ "$ACCEL" = "nvidia" ]; then
+    GPU_COUNT=$(nvidia-smi --query-gpu=count --format=csv,noheader,nounits 2>/dev/null | head -1)
+    VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | sort -n | tail -1)
+else
+    if command -v rocm-smi &>/dev/null; then
+        GPU_COUNT=$(rocm-smi --showmeminfo vram 2>/dev/null | grep -c "VRAM Total Memory")
+        VRAM_BYTES=$(rocm-smi --showmeminfo vram 2>/dev/null | grep "VRAM Total Memory" | grep -oE '[0-9]+' | sort -n | tail -1)
+        [ -n "$VRAM_BYTES" ] && VRAM_MB=$((VRAM_BYTES / 1024 / 1024))
+    else
+        GPU_COUNT=$(amd-smi list --csv 2>/dev/null | tail -n +2 | grep -c .)
+    fi
+fi
+
+if ! [[ "$VRAM_MB" =~ ^[0-9]+$ ]]; then
+    VRAM_MB=""
+fi
 
 if [ -z "$VRAM_MB" ]; then
     warn "Could not detect GPU memory. This model needs ${MIN_VRAM_GB}+ GB VRAM."
@@ -103,11 +137,20 @@ else
     fi
 fi
 
-# NVIDIA Container Toolkit CDI spec — required for --device nvidia.com/gpu=all
-if [ -f /etc/cdi/nvidia.yaml ] || [ -f /var/run/cdi/nvidia.yaml ]; then
-    ok "NVIDIA CDI spec found"
+if [ "$ACCEL" = "nvidia" ]; then
+    # NVIDIA Container Toolkit CDI spec — required for --device nvidia.com/gpu=all
+    if [ -f /etc/cdi/nvidia.yaml ] || [ -f /var/run/cdi/nvidia.yaml ]; then
+        ok "NVIDIA CDI spec found"
+    else
+        warn "No NVIDIA CDI spec found. If the container fails to see the GPU, generate one: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml"
+    fi
 else
-    warn "No NVIDIA CDI spec found. If the container fails to see the GPU, generate one: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml"
+    # AMD KFD/DRI device nodes — required for --device=/dev/kfd --device=/dev/dri
+    if [ -e /dev/kfd ] && [ -e /dev/dri ]; then
+        ok "AMD KFD/DRI device nodes found"
+    else
+        warn "No /dev/kfd or /dev/dri found. Ensure the amdgpu kernel driver is loaded."
+    fi
 fi
 
 # curl + jq
@@ -160,6 +203,13 @@ if [ "$RUNTIME" = "podman" ]; then
     PODMAN_FLAGS="--security-opt=label=disable --userns=keep-id:uid=1001"
 fi
 
+# --- Build accelerator-specific device flags ---
+if [ "$ACCEL" = "nvidia" ]; then
+    DEVICE_FLAGS="--device nvidia.com/gpu=all"
+else
+    DEVICE_FLAGS="--device=/dev/kfd --device=/dev/dri --group-add keep-groups"
+fi
+
 # --- Start the server ---
 header "Starting the Red Hat AI Inference Server..."
 
@@ -171,7 +221,7 @@ info "Starting server with $MODEL..."
 $RUNTIME run -d --name "$CONTAINER" \
   -p "${PORT}:8000" \
   --shm-size="$SHM_SIZE" \
-  --device nvidia.com/gpu=all \
+  $DEVICE_FLAGS \
   $PODMAN_FLAGS \
   -v "${CACHE_DIR}:/opt/app-root/src/.cache:Z" \
   -e "HF_TOKEN=$HF_TOKEN" \
