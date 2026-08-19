@@ -190,11 +190,9 @@ header "Loading model (this takes 2-10 minutes on first run)..."
 
 SECONDS=0
 while true; do
-    if $RUNTIME logs "$CONTAINER" 2>&1 | grep -q "Uvicorn running"; then
-        if curl -sf "http://localhost:${PORT}/health" &>/dev/null; then
-            ok "Server ready in ${SECONDS}s"
-            break
-        fi
+    if curl -sf "http://127.0.0.1:${PORT}/health" &>/dev/null; then
+        ok "Server ready in ${SECONDS}s"
+        break
     fi
 
     if $RUNTIME logs "$CONTAINER" 2>&1 | grep -q "RuntimeError\|Error.*memory\|Failed"; then
@@ -220,14 +218,14 @@ done
 # --- Verify ---
 header "Verifying the API..."
 
-HEALTH=$(curl -sf "http://localhost:${PORT}/health" 2>/dev/null && echo "healthy" || echo "unhealthy")
+HEALTH=$(curl -sf "http://127.0.0.1:${PORT}/health" 2>/dev/null && echo "healthy" || echo "unhealthy")
 if [ "$HEALTH" = "healthy" ]; then
     ok "Health endpoint: healthy"
 else
     fail "Health endpoint not responding. Check logs: $RUNTIME logs $CONTAINER"
 fi
 
-MODELS=$(curl -s "http://localhost:${PORT}/v1/models" 2>/dev/null)
+MODELS=$(curl -s "http://127.0.0.1:${PORT}/v1/models" 2>/dev/null)
 if echo "$MODELS" | jq -e '.data[0].id' &>/dev/null; then
     MODEL_ID=$(echo "$MODELS" | jq -r '.data[0].id')
     ok "Model serving: $MODEL_ID"
@@ -239,7 +237,7 @@ fi
 header "Making your first inference call..."
 echo
 
-RESPONSE=$(curl -s "http://localhost:${PORT}/v1/chat/completions" \
+RESPONSE=$(curl -s "http://127.0.0.1:${PORT}/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -d "{
     \"model\": \"$MODEL\",
@@ -260,7 +258,7 @@ echo -e "${BOLD}Tokens used:${NC} $TOKENS (cost on this server: \$0.00)"
 # --- Classification demo ---
 header "Bonus: classifying text..."
 
-POS=$(curl -s "http://localhost:${PORT}/v1/chat/completions" \
+POS=$(curl -s "http://127.0.0.1:${PORT}/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -d "{
     \"model\": \"$MODEL\",
@@ -268,7 +266,7 @@ POS=$(curl -s "http://localhost:${PORT}/v1/chat/completions" \
     \"max_tokens\": 5
   }" | jq -r '.choices[0].message.content')
 
-NEG=$(curl -s "http://localhost:${PORT}/v1/chat/completions" \
+NEG=$(curl -s "http://127.0.0.1:${PORT}/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -d "{
     \"model\": \"$MODEL\",
@@ -282,14 +280,14 @@ echo -e "  \"The deployment failed and data was lost.\"    → ${RED}${NEG}${NC}
 # --- Summary ---
 header "Done!"
 echo
-echo -e "  The Red Hat AI Inference Server is running at ${BOLD}http://localhost:${PORT}${NC}"
+echo -e "  The Red Hat AI Inference Server is running at ${BOLD}http://127.0.0.1:${PORT}${NC}"
 echo -e "  Model: ${BOLD}$MODEL${NC}"
 echo -e "  API: ${BOLD}OpenAI-compatible${NC} (/v1/chat/completions)"
 echo -e "  Cache: ${BOLD}$CACHE_DIR${NC} (weights persist across restarts)"
 echo
 echo "  Try your own prompt:"
 echo
-echo "    curl -s http://localhost:${PORT}/v1/chat/completions \\"
+echo "    curl -s http://127.0.0.1:${PORT}/v1/chat/completions \\"
 echo "      -H 'Content-Type: application/json' \\"
 echo "      -d '{\"model\": \"$MODEL\", \"messages\": [{\"role\": \"user\", \"content\": \"YOUR QUESTION HERE\"}], \"max_tokens\": 150}' | jq '.choices[0].message.content'"
 echo
