@@ -1,13 +1,15 @@
 #!/bin/bash
-# RHAIIS CPU Quickstart — One-click model serving
-# Pulls the Red Hat AI Inference Server, serves your chosen model, runs your first call.
+# RHAIIS GPU Quickstart — One-click model serving
+# Pulls the Red Hat AI Inference Server, serves your chosen model on an NVIDIA GPU, runs your first call.
 
 set -e
 
-IMAGE="${IMAGE:-registry.redhat.io/rhaii-early-access/vllm-cpu-rhel9:3.5.0-ea.2-1782965184}"
+IMAGE="${IMAGE:-quay.io/aipcc/rhaiis/cuda-ubi9}"  # TODO: changed for testing! Switch back to registry.redhat.io image!!
 CACHE_DIR="${CACHE_DIR:-$HOME/rhaii-cache}"
 CONTAINER="inference-server"
 PORT=8000
+GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
+DTYPE="${DTYPE:-auto}"
 
 # --- Colors ---
 RED='\033[0;31m'
@@ -27,15 +29,15 @@ header(){ echo -e "\n${BOLD}$1${NC}"; }
 if [ -z "$MODEL" ]; then
     header "Which model do you want to serve?"
     echo
-    echo -e "  ${BOLD}1)${NC} Granite 2B  — lightweight, runs on 16 GB RAM (good for getting started)"
-    echo -e "  ${BOLD}2)${NC} Qwen 7B    — higher quality, runs on 32 GB RAM (matches the RHAIIS 3.5 blog)"
+    echo -e "  ${BOLD}1)${NC} Granite 2B          — lightweight, runs on 8 GB VRAM (good for getting started)"
+    echo -e "  ${BOLD}2)${NC} Qwen3.8-27B-FP8    — higher quality, runs on 40 GB+ VRAM (matches the RHAIIS 3.5 blog)"
     echo
     read -rp "  Enter 1 or 2 [default: 1]: " MODEL_CHOICE
     MODEL_CHOICE="${MODEL_CHOICE:-1}"
 
     case "$MODEL_CHOICE" in
         2)
-            MODEL="Qwen/Qwen2.5-7B-Instruct"
+            MODEL="Qwen/Qwen3.8-27B-FP8"
             ;;
         *)
             MODEL="ibm-granite/granite-3.3-2b-instruct"
@@ -45,25 +47,26 @@ fi
 
 # --- Auto-detect model size and set parameters ---
 MODEL_LOWER=$(echo "$MODEL" | tr '[:upper:]' '[:lower:]')
-if echo "$MODEL_LOWER" | grep -qE '14b|15b|16b'; then
-    KVCACHE_SPACE="${KVCACHE_SPACE:-10}"
+if echo "$MODEL_LOWER" | grep -qE '(^|[^0-9])(27|30|32|34|70|72)b'; then
+    MAX_MODEL_LEN="${MAX_MODEL_LEN:-8192}"
+    SHM_SIZE="${SHM_SIZE:-8g}"
+    MIN_VRAM_GB=40
+elif echo "$MODEL_LOWER" | grep -qE '(^|[^0-9])(14|15|16)b'; then
     MAX_MODEL_LEN="${MAX_MODEL_LEN:-4096}"
     SHM_SIZE="${SHM_SIZE:-8g}"
-    MIN_RAM_GB=56
-elif echo "$MODEL_LOWER" | grep -qE '7b|8b|9b|10b|11b|12b|13b'; then
-    KVCACHE_SPACE="${KVCACHE_SPACE:-10}"
+    MIN_VRAM_GB=20
+elif echo "$MODEL_LOWER" | grep -qE '(^|[^0-9])(7|8|9|10|11|12|13)b'; then
     MAX_MODEL_LEN="${MAX_MODEL_LEN:-4096}"
     SHM_SIZE="${SHM_SIZE:-8g}"
-    MIN_RAM_GB=28
+    MIN_VRAM_GB=16
 else
-    KVCACHE_SPACE="${KVCACHE_SPACE:-4}"
     MAX_MODEL_LEN="${MAX_MODEL_LEN:-2048}"
     SHM_SIZE="${SHM_SIZE:-4g}"
-    MIN_RAM_GB=14
+    MIN_VRAM_GB=8
 fi
 
 ok "Model: $MODEL"
-info "KV cache: ${KVCACHE_SPACE} GB | Max context: ${MAX_MODEL_LEN} tokens | Shared memory: ${SHM_SIZE}"
+info "GPU memory utilization: ${GPU_MEMORY_UTILIZATION} | Max context: ${MAX_MODEL_LEN} tokens | Shared memory: ${SHM_SIZE}"
 
 # --- Pre-flight checks ---
 header "Checking requirements..."
@@ -78,32 +81,33 @@ else
 fi
 ok "Container runtime: $RUNTIME"
 
-# Memory
-if [ -f /proc/meminfo ]; then
-    MEM_GB=$(awk '/MemTotal/ {printf "%.0f", $2/1024/1024}' /proc/meminfo)
-else
-    MEM_GB=$(sysctl -n hw.memsize 2>/dev/null | awk '{printf "%.0f", $1/1024/1024/1024}')
-fi
-
-if [ -z "$MEM_GB" ]; then
-    warn "Could not detect memory. This model needs ${MIN_RAM_GB}+ GB RAM."
-elif [ "$MEM_GB" -lt "$MIN_RAM_GB" ]; then
-    fail "Found ${MEM_GB} GB RAM. ${MODEL} needs ${MIN_RAM_GB} GB minimum. Try a smaller model or set MODEL= to override."
-else
-    ok "Memory: ${MEM_GB} GB (minimum ${MIN_RAM_GB} GB for this model)"
-fi
-
-# Architecture
-ARCH=$(uname -m)
-if [ "$ARCH" != "x86_64" ]; then
-    warn "Architecture: $ARCH — this image is built for x86_64. It may not work."
-else
-    ok "Architecture: $ARCH"
-fi
-
 # OS check — warn on macOS
 if [ "$(uname -s)" = "Darwin" ]; then
-    warn "macOS detected. The RHAIIS container requires Linux (RHEL, Fedora, Ubuntu). It will not run natively on macOS."
+    warn "macOS detected. The RHAIIS container requires Linux (RHEL, Fedora, Ubuntu) with an NVIDIA GPU. It will not run natively on macOS."
+fi
+
+# NVIDIA GPU + driver
+command -v nvidia-smi &>/dev/null || fail "nvidia-smi not found. Install the NVIDIA driver and NVIDIA Container Toolkit and try again."
+
+GPU_COUNT=$(nvidia-smi --query-gpu=count --format=csv,noheader,nounits 2>/dev/null | head -1)
+VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | sort -n | tail -1)
+
+if [ -z "$VRAM_MB" ]; then
+    warn "Could not detect GPU memory. This model needs ${MIN_VRAM_GB}+ GB VRAM."
+else
+    VRAM_GB=$((VRAM_MB / 1024))
+    if [ "$VRAM_GB" -lt "$MIN_VRAM_GB" ]; then
+        fail "Found ${VRAM_GB} GB VRAM on the largest GPU. ${MODEL} needs ${MIN_VRAM_GB} GB minimum. Try a smaller model or set MODEL= to override."
+    else
+        ok "GPU: ${GPU_COUNT} device(s) detected, ${VRAM_GB} GB VRAM on the largest (minimum ${MIN_VRAM_GB} GB for this model)"
+    fi
+fi
+
+# NVIDIA Container Toolkit CDI spec — required for --device nvidia.com/gpu=all
+if [ -f /etc/cdi/nvidia.yaml ] || [ -f /var/run/cdi/nvidia.yaml ]; then
+    ok "NVIDIA CDI spec found"
+else
+    warn "No NVIDIA CDI spec found. If the container fails to see the GPU, generate one: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml"
 fi
 
 # curl + jq
@@ -132,7 +136,7 @@ header "Checking registry access..."
 if ! $RUNTIME pull --quiet "$IMAGE" &>/dev/null 2>&1; then
     warn "Need to log in to registry.redhat.io"
     echo "  Enter your Red Hat Customer Portal credentials (free at access.redhat.com):"
-    $RUNTIME login registry.redhat.io || fail "Registry login failed."
+    $RUNTIME login quay.io || fail "Registry login failed." # TODO: changed for testing! Switch back to registry.redhat.io!!
 fi
 ok "Registry access confirmed"
 
@@ -167,14 +171,16 @@ info "Starting server with $MODEL..."
 $RUNTIME run -d --name "$CONTAINER" \
   -p "${PORT}:8000" \
   --shm-size="$SHM_SIZE" \
+  --device nvidia.com/gpu=all \
   $PODMAN_FLAGS \
   -v "${CACHE_DIR}:/opt/app-root/src/.cache:Z" \
   -e "HF_TOKEN=$HF_TOKEN" \
-  -e "VLLM_CPU_KVCACHE_SPACE=$KVCACHE_SPACE" \
+  -e HF_HUB_OFFLINE=0 \
   "$IMAGE" \
   --model "$MODEL" \
-  --dtype bfloat16 \
+  --dtype "$DTYPE" \
   --host 0.0.0.0 \
+  --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
   --max-model-len "$MAX_MODEL_LEN" &>/dev/null
 
 ok "Container started"
