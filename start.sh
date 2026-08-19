@@ -4,7 +4,7 @@
 
 set -e
 
-IMAGE="${IMAGE:-quay.io/aipcc/rhaiis/cuda-ubi9}"  # TODO: changed for testing! Switch back to registry.redhat.io image!!
+IMAGE="${IMAGE:-quay.io/aipcc/rhaiis/cuda-ubi9:3.5.0}"  # TODO: changed for testing! Switch back to registry.redhat.io image!!
 CACHE_DIR="${CACHE_DIR:-$HOME/rhaii-cache}"
 CONTAINER="inference-server"
 PORT=8000
