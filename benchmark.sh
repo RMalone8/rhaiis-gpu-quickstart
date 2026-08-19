@@ -1,18 +1,18 @@
 #!/bin/bash
 # RHAIIS GPU Quickstart — Benchmark your hardware
-# Runs GuideLLM against your already-running inference server.
-# Requires: start.sh already ran successfully, Python 3.10+
+# Runs the official Red Hat GuideLLM container against your already-running inference server.
+# Requires: start.sh already ran successfully
 
 set -e
 
-GUIDELLM_DIR="${GUIDELLM_DIR:-$HOME/.guidellm}"
+GUIDELLM_IMAGE="${GUIDELLM_IMAGE:-registry.redhat.io/rhai/guidellm-rhel9:3.5.0}"
 PORT="${PORT:-8000}"
 ENDPOINT="http://127.0.0.1:${PORT}"
 PROMPT_TOKENS="${PROMPT_TOKENS:-256}"
 OUTPUT_TOKENS="${OUTPUT_TOKENS:-128}"
 PROFILE="${PROFILE:-sweep}"
 MAX_SECONDS="${MAX_SECONDS:-30}"
-RESULTS_DIR="${RESULTS_DIR:-$GUIDELLM_DIR/results}"
+RESULTS_DIR="${RESULTS_DIR:-$HOME/.guidellm/results}"
 
 # --- Colors ---
 RED='\033[0;31m'
@@ -31,50 +31,50 @@ header(){ echo -e "\n${BOLD}$1${NC}"; }
 # --- Pre-flight checks ---
 header "Checking requirements..."
 
-# Python
-if command -v python3 &>/dev/null; then
-    PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-    PY_MAJOR=$(echo "$PY_VERSION" | cut -d. -f1)
-    PY_MINOR=$(echo "$PY_VERSION" | cut -d. -f2)
-    if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 10 ]; }; then
-        fail "Python 3.10+ required. Found $PY_VERSION."
-    fi
-    ok "Python: $PY_VERSION"
+# Container runtime
+if command -v podman &>/dev/null; then
+    RUNTIME=podman
+elif command -v docker &>/dev/null; then
+    RUNTIME=docker
 else
-    fail "Python 3 is required. Install it: sudo dnf install python3 (RHEL/Fedora) or sudo apt install python3 (Ubuntu)."
+    fail "podman or docker is required. Install one and try again."
 fi
+ok "Container runtime: $RUNTIME"
 
-# pip
-python3 -m pip --version &>/dev/null || fail "pip is required. Install it: sudo dnf install python3-pip (RHEL/Fedora) or sudo apt install python3-pip (Ubuntu)."
-ok "pip available"
+# curl + jq
+command -v curl &>/dev/null || fail "curl is required."
+command -v jq &>/dev/null || fail "jq is required. Install it: sudo dnf install jq (RHEL/Fedora) or sudo apt install jq (Ubuntu)."
+ok "curl and jq available"
 
 # Inference server running
 if curl -sf "${ENDPOINT}/health" &>/dev/null; then
-    MODEL_ID=$(curl -s "${ENDPOINT}/v1/models" | python3 -c "import sys,json; print(json.load(sys.stdin)['data'][0]['id'])" 2>/dev/null || echo "unknown")
+    MODEL_ID=$(curl -s "${ENDPOINT}/v1/models" | jq -r '.data[0].id' 2>/dev/null || echo "unknown")
     ok "Inference server running at ${ENDPOINT} (model: ${MODEL_ID})"
 else
     fail "Inference server not running at ${ENDPOINT}. Run ./start.sh first."
 fi
 
-# --- Set up GuideLLM ---
-header "Setting up GuideLLM..."
+# --- Registry login ---
+header "Checking registry access..."
 
-VENV_DIR="$GUIDELLM_DIR/venv"
-if [ ! -d "$VENV_DIR" ]; then
-    info "Creating Python virtual environment..."
-    python3 -m venv "$VENV_DIR"
-    ok "Virtual environment created"
+if ! $RUNTIME pull --quiet "$GUIDELLM_IMAGE" &>/dev/null 2>&1; then
+    warn "Need to log in to registry.redhat.io"
+    echo "  Enter your Red Hat Customer Portal credentials (free at access.redhat.com):"
+    $RUNTIME login registry.redhat.io || fail "Registry login failed."
 fi
+ok "Registry access confirmed"
 
-# shellcheck disable=SC1091
-source "$VENV_DIR/bin/activate"
+# --- Pull GuideLLM ---
+header "Pulling GuideLLM..."
 
-if command -v guidellm &>/dev/null; then
-    ok "GuideLLM already installed"
-else
-    info "Installing GuideLLM..."
-    pip install --quiet "guidellm[recommended]" 2>&1 | tail -1
-    ok "GuideLLM installed"
+info "Pulling container image (first time may take a few minutes)..."
+$RUNTIME pull "$GUIDELLM_IMAGE" 2>&1 | tail -1
+ok "GuideLLM image ready"
+
+# --- Build runtime-specific flags ---
+PODMAN_FLAGS=""
+if [ "$RUNTIME" = "podman" ]; then
+    PODMAN_FLAGS="--security-opt=label=disable --userns=keep-id:uid=1001"
 fi
 
 # --- Run benchmark ---
@@ -86,13 +86,20 @@ echo
 
 mkdir -p "$RESULTS_DIR"
 
-guidellm run \
+# shellcheck disable=SC2086
+$RUNTIME run --rm -t \
+  --network=host \
+  $PODMAN_FLAGS \
+  -v "${RESULTS_DIR}:/results:Z" \
+  -e "HF_TOKEN=${HF_TOKEN}" \
+  "$GUIDELLM_IMAGE" \
+  guidellm run \
   --backend "kind=openai_http,target=${ENDPOINT},model=${MODEL_ID}" \
   --data "kind=synthetic_text,prompt_tokens=${PROMPT_TOKENS},output_tokens=${OUTPUT_TOKENS}" \
   --profile "kind=${PROFILE}" \
   --constraint "kind=max_duration,seconds=${MAX_SECONDS}" \
-  --output "kind=json,path=${RESULTS_DIR}/benchmark.json" \
-  --output "kind=html,path=${RESULTS_DIR}/benchmark.html"
+  --output "kind=json,path=/results/benchmark.json" \
+  --output "kind=html,path=/results/benchmark.html"
 
 # --- Summary ---
 header "Done!"
