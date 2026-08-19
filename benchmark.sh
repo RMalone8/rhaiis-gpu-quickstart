@@ -6,6 +6,7 @@
 set -e
 
 GUIDELLM_IMAGE="${GUIDELLM_IMAGE:-registry.redhat.io/rhai/guidellm-rhel9:3.5.0}"
+CONTAINER="${CONTAINER:-guidellm-benchmark}"
 PORT="${PORT:-8000}"
 ENDPOINT="http://127.0.0.1:${PORT}"
 PROMPT_TOKENS="${PROMPT_TOKENS:-256}"
@@ -86,8 +87,13 @@ echo
 
 mkdir -p "$RESULTS_DIR"
 
+if $RUNTIME ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${CONTAINER}$"; then
+    $RUNTIME rm -f "$CONTAINER" &>/dev/null || true
+fi
+
 # shellcheck disable=SC2086
 $RUNTIME run --rm -t \
+  --name "$CONTAINER" \
   --network=host \
   $PODMAN_FLAGS \
   -v "${RESULTS_DIR}:/results:Z" \
