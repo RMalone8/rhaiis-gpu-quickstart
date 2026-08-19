@@ -1,13 +1,18 @@
 #!/bin/bash
-# RHAIIS CPU Quickstart — Benchmark your hardware
-# Runs cpueval against your already-running inference server.
-# Requires: start.sh already ran successfully, Python 3.9+, git
+# RHAIIS GPU Quickstart — Benchmark your hardware
+# Runs GuideLLM against your already-running inference server.
+# Requires: start.sh already ran successfully, Python 3.10+
 
 set -e
 
-CPUEVAL_DIR="${CPUEVAL_DIR:-$HOME/.cpueval}"
+GUIDELLM_DIR="${GUIDELLM_DIR:-$HOME/.guidellm}"
 PORT="${PORT:-8000}"
-ENDPOINT="http://localhost:${PORT}"
+ENDPOINT="http://127.0.0.1:${PORT}"
+PROMPT_TOKENS="${PROMPT_TOKENS:-256}"
+OUTPUT_TOKENS="${OUTPUT_TOKENS:-128}"
+PROFILE="${PROFILE:-sweep}"
+MAX_SECONDS="${MAX_SECONDS:-30}"
+RESULTS_DIR="${RESULTS_DIR:-$GUIDELLM_DIR/results}"
 
 # --- Colors ---
 RED='\033[0;31m'
@@ -31,17 +36,13 @@ if command -v python3 &>/dev/null; then
     PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
     PY_MAJOR=$(echo "$PY_VERSION" | cut -d. -f1)
     PY_MINOR=$(echo "$PY_VERSION" | cut -d. -f2)
-    if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 9 ]; }; then
-        fail "Python 3.9+ required. Found $PY_VERSION."
+    if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 10 ]; }; then
+        fail "Python 3.10+ required. Found $PY_VERSION."
     fi
     ok "Python: $PY_VERSION"
 else
     fail "Python 3 is required. Install it: sudo dnf install python3 (RHEL/Fedora) or sudo apt install python3 (Ubuntu)."
 fi
-
-# git
-command -v git &>/dev/null || fail "git is required."
-ok "git available"
 
 # pip
 python3 -m pip --version &>/dev/null || fail "pip is required. Install it: sudo dnf install python3-pip (RHEL/Fedora) or sudo apt install python3-pip (Ubuntu)."
@@ -55,20 +56,10 @@ else
     fail "Inference server not running at ${ENDPOINT}. Run ./start.sh first."
 fi
 
-# --- Install cpueval ---
-header "Setting up cpueval benchmarking tool..."
+# --- Set up GuideLLM ---
+header "Setting up GuideLLM..."
 
-if [ -d "$CPUEVAL_DIR/vllm-cpu-perf-eval" ]; then
-    ok "cpueval already installed at $CPUEVAL_DIR"
-else
-    info "Cloning vllm-cpu-perf-eval..."
-    mkdir -p "$CPUEVAL_DIR"
-    git clone https://github.com/redhat-et/vllm-cpu-perf-eval.git "$CPUEVAL_DIR/vllm-cpu-perf-eval" 2>&1 | tail -1
-    ok "cpueval cloned"
-fi
-
-# --- Set up Python venv ---
-VENV_DIR="$CPUEVAL_DIR/venv"
+VENV_DIR="$GUIDELLM_DIR/venv"
 if [ ! -d "$VENV_DIR" ]; then
     info "Creating Python virtual environment..."
     python3 -m venv "$VENV_DIR"
@@ -78,51 +69,43 @@ fi
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
 
-info "Installing dependencies..."
-pip install --quiet ansible-core 2>&1 | tail -1
-ok "ansible-core installed"
-
-# Install Ansible collections
-if [ -f "$CPUEVAL_DIR/vllm-cpu-perf-eval/automation/test-execution/ansible/requirements.yml" ]; then
-    ansible-galaxy collection install -r "$CPUEVAL_DIR/vllm-cpu-perf-eval/automation/test-execution/ansible/requirements.yml" --force &>/dev/null
-    ok "Ansible collections installed"
+if command -v guidellm &>/dev/null; then
+    ok "GuideLLM already installed"
+else
+    info "Installing GuideLLM..."
+    pip install --quiet "guidellm[recommended]" 2>&1 | tail -1
+    ok "GuideLLM installed"
 fi
 
 # --- Run benchmark ---
 header "Running benchmark against ${ENDPOINT}..."
 echo
-info "This will run a chat-smoke test suite against your running server."
+info "Profile: ${PROFILE} | Prompt tokens: ${PROMPT_TOKENS} | Output tokens: ${OUTPUT_TOKENS} | Max duration per strategy: ${MAX_SECONDS}s"
 info "Results include throughput (tok/s), time to first token (TTFT), and time per output token (TPOT)."
 echo
 
-cd "$CPUEVAL_DIR/vllm-cpu-perf-eval"
+mkdir -p "$RESULTS_DIR"
 
-export VLLM_ENDPOINT_MODE=external
-export VLLM_ENDPOINT_URL="$ENDPOINT"
-export LOADGEN_HOSTNAME=localhost
-
-./cpueval run --suite chat-smoke \
-  --workload chat \
-  --extra ansible_connection=local \
-  --extra guidellm_use_container=false
-
-# --- Show results ---
-header "Benchmark results:"
-echo
-
-./cpueval results --last
+guidellm run \
+  --backend "kind=openai_http,target=${ENDPOINT},model=${MODEL_ID}" \
+  --data "kind=synthetic_text,prompt_tokens=${PROMPT_TOKENS},output_tokens=${OUTPUT_TOKENS}" \
+  --profile "kind=${PROFILE}" \
+  --constraint "kind=max_duration,seconds=${MAX_SECONDS}" \
+  --output "kind=json,path=${RESULTS_DIR}/benchmark.json" \
+  --output "kind=html,path=${RESULTS_DIR}/benchmark.html"
 
 # --- Summary ---
 header "Done!"
 echo
-echo "  Results saved locally. Key metrics:"
+echo "  Results saved to:"
+echo "    ${RESULTS_DIR}/benchmark.json"
+echo "    ${RESULTS_DIR}/benchmark.html"
+echo
+echo "  Key metrics:"
 echo "    TTFT  — Time to First Token (prompt evaluation delay)"
 echo "    TPOT  — Time per Output Token (generation speed)"
 echo "    Tok/s — Aggregate throughput across parallel streams"
 echo
 echo "  For deeper analysis and interactive dashboards, see the blog post:"
 echo "    [From Zero to Benchmark — RHAIIS 3.5](URL)"
-echo
-echo "  Launch the interactive dashboard:"
-echo "    cd $CPUEVAL_DIR/vllm-cpu-perf-eval && ./cpueval dashboard start"
 echo

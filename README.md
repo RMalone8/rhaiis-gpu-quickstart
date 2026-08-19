@@ -328,13 +328,15 @@ Measure throughput and latency with the same toolchain used in the blog post:
 ./benchmark.sh
 ```
 
-The script installs [cpueval](https://github.com/redhat-et/vllm-cpu-perf-eval), runs a chat-smoke test suite against your running server, and reports:
+The script installs [GuideLLM](https://github.com/vllm-project/guidellm), sweeps a range of request loads against your running server, and reports:
 
 - **TTFT** — Time to First Token (prompt evaluation delay)
 - **TPOT** — Time per Output Token (generation speed)
 - **Tok/s** — Aggregate throughput across parallel streams
 
-For detailed interpretation and advanced benchmarking (NUMA pinning, multi-node setups, interactive dashboards), see the [blog post](URL).
+Results are saved to `~/.guidellm/results/benchmark.json` and `benchmark.html`. Override the workload shape with env vars, e.g. `PROMPT_TOKENS=512 OUTPUT_TOKENS=256 MAX_SECONDS=60 ./benchmark.sh`.
+
+For detailed interpretation and advanced benchmarking (multi-node setups, custom datasets), see the [blog post](URL).
 
 ## Add a chat UI
 
