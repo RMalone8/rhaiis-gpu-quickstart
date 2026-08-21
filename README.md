@@ -1,8 +1,8 @@
-# Serve AI Models on Any Linux Machine with an NVIDIA GPU
+# Serve AI Models on Any Linux Machine with an NVIDIA or AMD GPU
 
 _The Red Hat AI Inference Server in a single container. Open-weight models at zero cost per token._
 
-> This quickstart is a GPU-adapted companion to [From Zero to Benchmark: Deploying LLM Inference on CPU with RHAII 3.5](URL) — same workflow, backed by an NVIDIA GPU instead of CPU.
+> This quickstart is a GPU-adapted companion to [From Zero to Benchmark: Deploying LLM Inference on CPU with RHAII 3.5](URL) — same workflow, backed by an NVIDIA or AMD GPU instead of CPU.
 
 ## Overview
 
@@ -43,8 +43,8 @@ Prefer to do the whole thing step by step? Keep reading.
 
 | Requirement | Details |
 |---|---|
-| Linux with an NVIDIA GPU | RHEL 9/10, Fedora, Ubuntu 22.04+ (bare metal or VM) |
-| NVIDIA driver + Container Toolkit | With a CDI spec generated (`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`) |
+| Linux with an NVIDIA or AMD GPU | RHEL 9/10, Fedora, Ubuntu 22.04+ (bare metal or VM) |
+| NVIDIA driver + Container Toolkit, or AMD ROCm/amdgpu driver | NVIDIA needs a CDI spec (`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`); AMD needs `/dev/kfd` + `/dev/dri` |
 | VRAM | 8 GB minimum (Granite 2B) / 40 GB+ (Qwen3.8-27B-FP8) |
 | Podman or Docker | Any container runtime — CDI device requests (`--device nvidia.com/gpu=all`) require a recent version |
 | Red Hat registry access | Free account at [access.redhat.com](https://access.redhat.com) for the container image |
@@ -78,7 +78,7 @@ Not every model runs on every GPU. Here's what works where:
 
 Here's what the pieces are and how they fit together:
 
-**Red Hat AI Inference Server (RHAII)** is the production model serving engine built on vLLM. It's the same runtime that Red Hat AI deploys on OpenShift — but it also runs standalone as a container on any Linux machine with an NVIDIA GPU. Enterprise-supported, with the container passed direct GPU access via `--device nvidia.com/gpu=all` (NVIDIA Container Device Interface).
+**Red Hat AI Inference Server (RHAII)** is the production model serving engine built on vLLM. It's the same runtime that Red Hat AI deploys on OpenShift — but it also runs standalone as a container on any Linux machine with an NVIDIA or AMD GPU. Enterprise-supported, with the container passed direct GPU access via `--device nvidia.com/gpu=all` (NVIDIA CDI) or `--device=/dev/kfd --device=/dev/dri` (AMD ROCm).
 
 **The models** are open-weight — you can download, run, and modify them without paying per token. This quickstart offers two choices:
 - **IBM Granite 2B** — lightweight, Apache 2.0 licensed, good for classification, extraction, and summarization
@@ -116,7 +116,7 @@ mkdir -p ~/rhaii-cache
 
 ## Step 2: Start the inference server
 
-**Granite 2B** (8 GB+ VRAM):
+**NVIDIA — Granite 2B** (8 GB+ VRAM):
 
 ```bash
 podman run -d --name inference-server \
@@ -135,7 +135,7 @@ podman run -d --name inference-server \
   --max-model-len 2048
 ```
 
-**Qwen3.8-27B-FP8** (40 GB+ VRAM, matches the blog):
+**NVIDIA — Qwen3.8-27B-FP8** (40 GB+ VRAM, matches the blog):
 
 ```bash
 podman run -d --name inference-server \
@@ -154,6 +154,28 @@ podman run -d --name inference-server \
   --max-model-len 8192
 ```
 
+**AMD — Granite 2B** (8 GB+ VRAM):
+
+```bash
+podman run -d --name inference-server \
+  -p 8000:8000 \
+  --shm-size=4g \
+  --device=/dev/kfd --device=/dev/dri \
+  --cap-add=SYS_PTRACE \
+  --security-opt seccomp=unconfined \
+  --security-opt=label=disable \
+  --group-add keep-groups \
+  --runtime crun \
+  -v ~/rhaii-cache:/opt/app-root/src/.cache:Z \
+  -e "HF_TOKEN=$HF_TOKEN" \
+  quay.io/aipcc/rhaiis/rocm-ubi9:3.4.4 \
+  --model ibm-granite/granite-3.3-2b-instruct \
+  --dtype auto \
+  --host 0.0.0.0 \
+  --gpu-memory-utilization 0.90 \
+  --max-model-len 2048
+```
+
 **What the flags do:**
 
 | Flag | Purpose |
@@ -161,8 +183,11 @@ podman run -d --name inference-server \
 | `-p 8000:8000` | Map port 8000 for the API |
 | `--shm-size=4g/8g` | Shared memory for the inference engine (scale with model size) |
 | `--device nvidia.com/gpu=all` | Pass all NVIDIA GPUs into the container via CDI |
+| `--device=/dev/kfd --device=/dev/dri` | AMD equivalent — passes the KFD/DRI device nodes into the container |
+| `--cap-add=SYS_PTRACE` / `--security-opt seccomp=unconfined` | Required by the ROCm runtime for GPU access (AMD only) |
 | `--security-opt=label=disable` | Bypass SELinux labeling for bind-mounted volumes (RHEL) |
-| `--userns=keep-id:uid=1001` | Map host user to the container's application user |
+| `--userns=keep-id:uid=1001` | Map host user to the container's application user (NVIDIA) |
+| `--group-add keep-groups` / `--runtime crun` | AMD only, podman: keeps host video/render group access; `crun` is required since `--group-add keep-groups` doesn't work under `runc` |
 | `-v ~/rhaii-cache:...:Z` | Persistent model cache — weights survive container restarts |
 | `HF_TOKEN` | Authenticates with Hugging Face to download model weights |
 | `--host 0.0.0.0` | Listen on all interfaces (required for the port mapping to reach the container) |
@@ -170,7 +195,8 @@ podman run -d --name inference-server \
 | `--gpu-memory-utilization` | Fraction of GPU VRAM vLLM reserves upfront for weights + KV cache (default `0.90`) |
 | `--max-model-len` | Limit context length to manage memory |
 
-> **Using Docker?** Omit `--security-opt=label=disable` and `--userns=keep-id:uid=1001` — these are podman-specific flags for SELinux and user namespace mapping. `--device nvidia.com/gpu=all` works the same way on both, provided the NVIDIA Container Toolkit and a CDI spec are set up.
+
+> **Using Docker?** On NVIDIA, omit `--security-opt=label=disable` and `--userns=keep-id:uid=1001`. On AMD, swap `--group-add keep-groups --runtime crun` for `--group-add video --group-add render` — Docker doesn't need the `crun` runtime.
 
 The first run downloads the model weights (~4 GB for Granite 2B, ~27 GB for Qwen3.8-27B-FP8). Subsequent starts use the cached weights in `~/rhaii-cache`.
 
