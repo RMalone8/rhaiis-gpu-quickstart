@@ -82,10 +82,24 @@ ok "curl and jq available"
 
 # Inference server running
 if curl -sf "${ENDPOINT}/health" &>/dev/null; then
-    MODEL_ID=$(curl -s "${ENDPOINT}/v1/models" | jq -r '.data[0].id' 2>/dev/null || echo "unknown")
+    MODELS_RESPONSE=$(curl -s "${ENDPOINT}/v1/models")
+    MODEL_ID=$(echo "$MODELS_RESPONSE" | jq -r '.data[0].id' 2>/dev/null || echo "unknown")
+    SERVER_MAX_MODEL_LEN=$(echo "$MODELS_RESPONSE" | jq -r '.data[0].max_model_len // empty' 2>/dev/null)
     ok "Inference server running at ${ENDPOINT} (model: ${MODEL_ID})"
 else
     fail "Inference server not running at ${ENDPOINT}. Run ./start.sh first."
+fi
+
+# Workload must fit in the server's context window
+CHAT_TEMPLATE_OVERHEAD=64
+REQUIRED_TOKENS=$((PROMPT_TOKENS + OUTPUT_TOKENS + CHAT_TEMPLATE_OVERHEAD))
+if [[ "$SERVER_MAX_MODEL_LEN" =~ ^[0-9]+$ ]]; then
+    if [ "$REQUIRED_TOKENS" -gt "$SERVER_MAX_MODEL_LEN" ]; then
+        fail "${WORKLOAD_NAME} workload needs ~${REQUIRED_TOKENS} tokens (${PROMPT_TOKENS} in + ${OUTPUT_TOKENS} out + template overhead), but ${MODEL_ID} is running with --max-model-len=${SERVER_MAX_MODEL_LEN}. Pick a smaller workload, or restart the server with a larger MAX_MODEL_LEN (e.g. MAX_MODEL_LEN=${REQUIRED_TOKENS} ./start.sh)."
+    fi
+    ok "Workload fits server context window (${REQUIRED_TOKENS} / ${SERVER_MAX_MODEL_LEN} tokens)"
+else
+    warn "Could not determine the server's max-model-len — skipping context-window check. If every request errors out, the workload may be too large for this model's context window."
 fi
 
 # --- Registry login ---
