@@ -92,8 +92,23 @@ command -v nvidia-smi &>/dev/null || fail "nvidia-smi not found. Install the NVI
 GPU_COUNT=$(nvidia-smi --query-gpu=count --format=csv,noheader,nounits 2>/dev/null | head -1)
 VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | sort -n | tail -1)
 
+if ! [[ "$GPU_COUNT" =~ ^[0-9]+$ ]] || [ "$GPU_COUNT" -lt 1 ]; then
+    GPU_COUNT=1
+fi
+
+# Tensor parallelism: shard the model across all detected GPUs by default.
+TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-$GPU_COUNT}"
+
 if [ -z "$VRAM_MB" ]; then
     warn "Could not detect GPU memory. This model needs ${MIN_VRAM_GB}+ GB VRAM."
+elif [ "$TENSOR_PARALLEL_SIZE" -gt 1 ]; then
+    VRAM_TOTAL_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | awk '{sum+=$1} END {print sum}')
+    VRAM_TOTAL_GB=$((VRAM_TOTAL_MB / 1024))
+    if [ "$VRAM_TOTAL_GB" -lt "$MIN_VRAM_GB" ]; then
+        fail "Found ${GPU_COUNT} GPUs with ${VRAM_TOTAL_GB} GB combined VRAM. ${MODEL} needs ${MIN_VRAM_GB} GB minimum across all GPUs. Try a smaller model or set MODEL= to override."
+    else
+        ok "GPU: ${GPU_COUNT} devices detected, ${VRAM_TOTAL_GB} GB combined VRAM, tensor-parallel-size=${TENSOR_PARALLEL_SIZE} (minimum ${MIN_VRAM_GB} GB for this model)"
+    fi
 else
     VRAM_GB=$((VRAM_MB / 1024))
     if [ "$VRAM_GB" -lt "$MIN_VRAM_GB" ]; then
@@ -160,6 +175,16 @@ if [ "$RUNTIME" = "podman" ]; then
     PODMAN_FLAGS="--security-opt=label=disable --userns=keep-id:uid=1001"
 fi
 
+# --- Build tensor-parallel flags ---
+VLLM_TP_FLAGS=""
+if [ "$TENSOR_PARALLEL_SIZE" -gt 1 ]; then
+    SHM_SIZE_GB="${SHM_SIZE%g}"
+    if [[ "$SHM_SIZE_GB" =~ ^[0-9]+$ ]] && [ "$SHM_SIZE_GB" -lt 16 ]; then
+        SHM_SIZE="16g"
+    fi
+    VLLM_TP_FLAGS="--tensor-parallel-size $TENSOR_PARALLEL_SIZE"
+fi
+
 # --- Start the server ---
 header "Starting the Red Hat AI Inference Server..."
 
@@ -181,7 +206,8 @@ $RUNTIME run -d --name "$CONTAINER" \
   --dtype "$DTYPE" \
   --host 0.0.0.0 \
   --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
-  --max-model-len "$MAX_MODEL_LEN" &>/dev/null
+  --max-model-len "$MAX_MODEL_LEN" \
+  $VLLM_TP_FLAGS &>/dev/null
 
 ok "Container started"
 
@@ -282,14 +308,15 @@ header "Done!"
 echo
 echo -e "  The Red Hat AI Inference Server is running at ${BOLD}http://127.0.0.1:${PORT}${NC}"
 echo -e "  Model: ${BOLD}$MODEL${NC}"
+if [ "$TENSOR_PARALLEL_SIZE" -gt 1 ]; then
+    echo -e "  Tensor parallel size: ${BOLD}$TENSOR_PARALLEL_SIZE${NC} (sharded across $TENSOR_PARALLEL_SIZE GPUs)"
+fi
 echo -e "  API: ${BOLD}OpenAI-compatible${NC} (/v1/chat/completions)"
 echo -e "  Cache: ${BOLD}$CACHE_DIR${NC} (weights persist across restarts)"
 echo
-echo "  Try your own prompt:"
+echo "  Ask your own question:"
 echo
-echo "    curl -s http://127.0.0.1:${PORT}/v1/chat/completions \\"
-echo "      -H 'Content-Type: application/json' \\"
-echo "      -d '{\"model\": \"$MODEL\", \"messages\": [{\"role\": \"user\", \"content\": \"YOUR QUESTION HERE\"}], \"max_tokens\": 150}' | jq '.choices[0].message.content'"
+echo "    ./send-request.sh"
 echo
 echo "  Benchmark your hardware:"
 echo
