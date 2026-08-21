@@ -1,8 +1,8 @@
-# CLAUDE.md — RHAIIS CPU Quickstart
+# CLAUDE.md — RHAII CPU Quickstart
 
 ## What This Is
 
-One-click quickstart for serving open-weight AI models on a Linux machine with an NVIDIA GPU using the Red Hat AI Inference Server (RHAIIS 3.5). Companion repo for the "From Zero to Benchmark" blog post.
+One-click quickstart for serving open-weight AI models on a Linux machine with an NVIDIA GPU using the Red Hat AI Inference Server (RHAII 3.5). Companion repo for the "From Zero to Benchmark" blog post.
 
 No cluster. Just `podman run` + `curl`, backed by an NVIDIA GPU via `--device nvidia.com/gpu=all`.
 
@@ -26,7 +26,7 @@ Requires the NVIDIA driver and NVIDIA Container Toolkit on the host, with a CDI 
 | Variable | Default | Purpose |
 |---|---|---|
 | `MODEL` | (interactive prompt) | Model to serve. Set to skip the prompt. |
-| `IMAGE` | `registry.redhat.io/rhaii-early-access/vllm-cuda-rhel9:3.5.0-ea.2-1782965184` | RHAIIS CUDA container image |
+| `IMAGE` | `registry.redhat.io/rhaii-early-access/vllm-cuda-rhel9:3.5.0-ea.2-1782965184` | RHAII CUDA container image |
 | `CACHE_DIR` | `~/rhaii-cache` | Persistent model weight cache |
 | `HF_TOKEN` | (prompted) | Hugging Face access token |
 | `GPU_MEMORY_UTILIZATION` | `0.90` | Fraction of VRAM vLLM may reserve |
@@ -36,11 +36,11 @@ Requires the NVIDIA driver and NVIDIA Container Toolkit on the host, with a CDI 
 
 ## Image Status
 
-Using RHAIIS 3.5 Early Access. When GA drops, update IMAGE to:
+Using RHAII 3.5 Early Access. When GA drops, update IMAGE to:
 `registry.redhat.io/rhaii/vllm-cuda-rhel9:3.5.0`
 
 ## Blog Alignment
 
 This quickstart is the on-ramp to:
-"From Zero to Benchmark: Deploying LLM Inference on CPU with RHAIIS 3.5"
+"From Zero to Benchmark: Deploying LLM Inference on CPU with RHAII 3.5"
 by Maryam Tahhan, John Harrigan, Anton Ivanov

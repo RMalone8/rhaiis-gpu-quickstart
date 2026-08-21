@@ -1,5 +1,5 @@
 #!/bin/bash
-# RHAIIS GPU Quickstart — Benchmark your hardware
+# RHAII GPU Quickstart — Benchmark your hardware
 # Runs the official Red Hat GuideLLM container against your already-running inference server.
 # Requires: start.sh already ran successfully
 
@@ -120,5 +120,5 @@ echo "    TPOT  — Time per Output Token (generation speed)"
 echo "    Tok/s — Aggregate throughput across parallel streams"
 echo
 echo "  For deeper analysis and interactive dashboards, see the blog post:"
-echo "    [From Zero to Benchmark — RHAIIS 3.5](URL)"
+echo "    [From Zero to Benchmark — RHAII 3.5](URL)"
 echo
