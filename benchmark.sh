@@ -135,7 +135,7 @@ $RUNTIME run --rm -t \
   guidellm run \
   --backend "kind=openai_http,target=${ENDPOINT},model=${MODEL_ID}" \
   --data "kind=synthetic_text,prompt_tokens=${PROMPT_TOKENS},output_tokens=${OUTPUT_TOKENS}" \
-  --profile "kind=concurrent,streams=${STREAMS}" \
+  --profile "{\"kind\": \"concurrent\", \"streams\": [${STREAMS}]}" \
   --constraint "kind=max_duration,seconds=${MAX_SECONDS}" \
   --output "kind=json,path=/results/benchmark.json" \
   --output "kind=html,path=/results/benchmark.html"
