@@ -9,9 +9,7 @@ GUIDELLM_IMAGE="${GUIDELLM_IMAGE:-registry.redhat.io/rhai/guidellm-rhel9:3.5.0}"
 CONTAINER="${CONTAINER:-guidellm-benchmark}"
 PORT="${PORT:-8000}"
 ENDPOINT="http://127.0.0.1:${PORT}"
-PROMPT_TOKENS="${PROMPT_TOKENS:-256}"
-OUTPUT_TOKENS="${OUTPUT_TOKENS:-128}"
-PROFILE="${PROFILE:-sweep}"
+STREAMS="${STREAMS:-1,5,10,25,50}"
 MAX_SECONDS="${MAX_SECONDS:-30}"
 RESULTS_DIR="${RESULTS_DIR:-$HOME/.guidellm/results}"
 
@@ -28,6 +26,41 @@ ok()    { echo -e "${GREEN}✓${NC} $1"; }
 warn()  { echo -e "${YELLOW}!${NC} $1"; }
 fail()  { echo -e "${RED}✗${NC} $1"; exit 1; }
 header(){ echo -e "\n${BOLD}$1${NC}"; }
+
+# --- Workload profile selection ---
+if [ -z "$WORKLOAD" ]; then
+    header "Which workload do you want to benchmark?"
+    echo
+    echo -e "  ${BOLD}1)${NC} Balanced       — general use, recommended (1000 input / 1000 output tokens)"
+    echo -e "  ${BOLD}2)${NC} Decode-Heavy   — long-form generation, code (512 input / 2048 output tokens)"
+    echo -e "  ${BOLD}3)${NC} Prefill-Heavy  — long documents, short answers (2048 input / 128 output tokens)"
+    echo
+    read -rp "  Enter 1, 2, or 3 [default: 1]: " WORKLOAD
+    WORKLOAD="${WORKLOAD:-1}"
+fi
+
+case "$WORKLOAD" in
+    2)
+        WORKLOAD_NAME="Decode-Heavy"
+        DEFAULT_PROMPT_TOKENS=512
+        DEFAULT_OUTPUT_TOKENS=2048
+        ;;
+    3)
+        WORKLOAD_NAME="Prefill-Heavy"
+        DEFAULT_PROMPT_TOKENS=2048
+        DEFAULT_OUTPUT_TOKENS=128
+        ;;
+    *)
+        WORKLOAD_NAME="Balanced"
+        DEFAULT_PROMPT_TOKENS=1000
+        DEFAULT_OUTPUT_TOKENS=1000
+        ;;
+esac
+
+PROMPT_TOKENS="${PROMPT_TOKENS:-$DEFAULT_PROMPT_TOKENS}"
+OUTPUT_TOKENS="${OUTPUT_TOKENS:-$DEFAULT_OUTPUT_TOKENS}"
+
+ok "Workload: $WORKLOAD_NAME"
 
 # --- Pre-flight checks ---
 header "Checking requirements..."
@@ -81,7 +114,7 @@ fi
 # --- Run benchmark ---
 header "Running benchmark against ${ENDPOINT}..."
 echo
-info "Profile: ${PROFILE} | Prompt tokens: ${PROMPT_TOKENS} | Output tokens: ${OUTPUT_TOKENS} | Max duration per strategy: ${MAX_SECONDS}s"
+info "Workload: ${WORKLOAD_NAME} | Concurrency levels: ${STREAMS} | Prompt tokens: ${PROMPT_TOKENS} | Output tokens: ${OUTPUT_TOKENS} | Max duration per level: ${MAX_SECONDS}s"
 info "Results include throughput (tok/s), time to first token (TTFT), and time per output token (TPOT)."
 echo
 
@@ -102,7 +135,7 @@ $RUNTIME run --rm -t \
   guidellm run \
   --backend "kind=openai_http,target=${ENDPOINT},model=${MODEL_ID}" \
   --data "kind=synthetic_text,prompt_tokens=${PROMPT_TOKENS},output_tokens=${OUTPUT_TOKENS}" \
-  --profile "kind=${PROFILE}" \
+  --profile "kind=concurrent,streams=${STREAMS}" \
   --constraint "kind=max_duration,seconds=${MAX_SECONDS}" \
   --output "kind=json,path=/results/benchmark.json" \
   --output "kind=html,path=/results/benchmark.html"
