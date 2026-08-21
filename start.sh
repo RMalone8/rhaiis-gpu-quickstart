@@ -1,5 +1,5 @@
 #!/bin/bash
-# RHAIIS GPU Quickstart — One-click model serving
+# RHAII GPU Quickstart — One-click model serving
 # Pulls the Red Hat AI Inference Server, serves your chosen model on an NVIDIA GPU, runs your first call.
 
 set -e
@@ -30,7 +30,7 @@ if [ -z "$MODEL" ]; then
     header "Which model do you want to serve?"
     echo
     echo -e "  ${BOLD}1)${NC} Granite 2B          — lightweight, runs on 8 GB VRAM (good for getting started)"
-    echo -e "  ${BOLD}2)${NC} Qwen3.8-27B-FP8    — higher quality, runs on 40 GB+ VRAM (matches the RHAIIS 3.5 blog)"
+    echo -e "  ${BOLD}2)${NC} Qwen3.8-27B-FP8    — higher quality, runs on 40 GB+ VRAM (matches the RHAII 3.5 blog)"
     echo
     read -rp "  Enter 1 or 2 [default: 1]: " MODEL_CHOICE
     MODEL_CHOICE="${MODEL_CHOICE:-1}"
@@ -83,7 +83,7 @@ ok "Container runtime: $RUNTIME"
 
 # OS check — warn on macOS
 if [ "$(uname -s)" = "Darwin" ]; then
-    warn "macOS detected. The RHAIIS container requires Linux (RHEL, Fedora, Ubuntu) with an NVIDIA GPU. It will not run natively on macOS."
+    warn "macOS detected. The RHAII container requires Linux (RHEL, Fedora, Ubuntu) with an NVIDIA GPU. It will not run natively on macOS."
 fi
 
 # NVIDIA GPU + driver

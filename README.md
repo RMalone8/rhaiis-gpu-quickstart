@@ -2,11 +2,11 @@
 
 _The Red Hat AI Inference Server in a single container. Open-weight models at zero cost per token._
 
-> This quickstart is a GPU-adapted companion to [From Zero to Benchmark: Deploying LLM Inference on CPU with RHAIIS 3.5](URL) — same workflow, backed by an NVIDIA GPU instead of CPU.
+> This quickstart is a GPU-adapted companion to [From Zero to Benchmark: Deploying LLM Inference on CPU with RHAII 3.5](URL) — same workflow, backed by an NVIDIA GPU instead of CPU.
 
 ## Overview
 
-The Red Hat AI Inference Server (RHAIIS) is a production-grade model serving engine — the same vLLM-based runtime that powers Red Hat AI on OpenShift. It also runs standalone on any Linux machine with a GPU, as a single container.
+The Red Hat AI Inference Server (RHAII) is a production-grade model serving engine — the same vLLM-based runtime that powers Red Hat AI on OpenShift. It also runs standalone on any Linux machine with a GPU, as a single container.
 
 This quickstart walks you through it:
 
@@ -78,7 +78,7 @@ Not every model runs on every GPU. Here's what works where:
 
 Here's what the pieces are and how they fit together:
 
-**Red Hat AI Inference Server (RHAIIS)** is the production model serving engine built on vLLM. It's the same runtime that Red Hat AI deploys on OpenShift — but it also runs standalone as a container on any Linux machine with an NVIDIA GPU. Enterprise-supported, with the container passed direct GPU access via `--device nvidia.com/gpu=all` (NVIDIA Container Device Interface).
+**Red Hat AI Inference Server (RHAII)** is the production model serving engine built on vLLM. It's the same runtime that Red Hat AI deploys on OpenShift — but it also runs standalone as a container on any Linux machine with an NVIDIA GPU. Enterprise-supported, with the container passed direct GPU access via `--device nvidia.com/gpu=all` (NVIDIA Container Device Interface).
 
 **The models** are open-weight — you can download, run, and modify them without paying per token. This quickstart offers two choices:
 - **IBM Granite 2B** — lightweight, Apache 2.0 licensed, good for classification, extraction, and summarization
@@ -282,7 +282,7 @@ rm -rf ~/rhaii-cache
 
 This quickstart is the "Hello World" of self-hosted AI — a quick validation that you have the inference server running, the model is serving, and the performance is roughly what you'd expect. You proved:
 
-- The Red Hat AI Inference Server (RHAIIS 3.5) runs on your hardware
+- The Red Hat AI Inference Server (RHAII 3.5) runs on your hardware
 - Open-weight models handle real tasks (classification, extraction, Q&A)
 - The API is OpenAI-compatible — anything you build here works everywhere
 - Model weights are cached locally for fast restarts
@@ -330,7 +330,7 @@ Open http://localhost:3000 in your browser. Create an admin account and start ch
 
 ## What makes this different from other runtimes
 
-| | Red Hat AI Inference Server (RHAIIS) | Other runtimes (Ollama, llama.cpp) |
+| | Red Hat AI Inference Server (RHAII) | Other runtimes (Ollama, llama.cpp) |
 |---|---|---|
 | **Engine** | vLLM — production throughput, continuous batching | llama.cpp — lightweight, single-user |
 | **Support** | Enterprise-supported by Red Hat | Community-supported |
@@ -347,7 +347,7 @@ The inference server runs any Hugging Face model. Swap the `--model` flag (or se
 
 | Model | Params | License | Good for | Notes |
 |---|---|---|---|---|
-| `Qwen/Qwen3.8-27B-FP8` | 27B (FP8) | Apache 2.0 | Multilingual reasoning, agentic tasks | **Matches the RHAIIS 3.5 blog post**. Needs 40 GB+ VRAM |
+| `Qwen/Qwen3.8-27B-FP8` | 27B (FP8) | Apache 2.0 | Multilingual reasoning, agentic tasks | **Matches the RHAII 3.5 blog post**. Needs 40 GB+ VRAM |
 | `ibm-granite/granite-3.3-2b-instruct` | 2B | Apache 2.0 | Classification, extraction, Q&A | **Default in this quickstart**. Runs on 8 GB+ VRAM |
 | `ibm-granite/granite-3.3-8b-instruct` | 8B | Apache 2.0 | Better reasoning, longer outputs | Needs ~16 GB VRAM |
 | `Qwen/Qwen2.5-3B-Instruct` | 3B | Apache 2.0 | Multilingual, strong on benchmarks | Origin: CN — check your org's policy |
@@ -359,7 +359,7 @@ The inference server runs any Hugging Face model. Swap the `--model` flag (or se
 
 ## Want to go further?
 
-- **Read the blog** — [From Zero to Benchmark: Deploying LLM Inference on CPU with RHAIIS 3.5](URL) covers advanced benchmarking, NUMA pinning, tool calling, and interactive dashboards
+- **Read the blog** — [From Zero to Benchmark: Deploying LLM Inference on CPU with RHAII 3.5](URL) covers advanced benchmarking, NUMA pinning, tool calling, and interactive dashboards
 - **Build an AI agent** — wrap this model in tools and multi-step orchestration. Available as a hands-on lab on the [Red Hat Demo Platform](https://demo.redhat.com)
 - **Deploy on OpenShift** — the same container, managed with auto-scaling and a model management dashboard. Available as a hands-on lab on the [Red Hat Demo Platform](https://demo.redhat.com)
 - **Learn more** — [Red Hat AI Inference Server documentation](https://docs.redhat.com/en/documentation/red_hat_ai_inference_server/)

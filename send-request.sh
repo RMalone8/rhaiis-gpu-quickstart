@@ -1,5 +1,5 @@
 #!/bin/bash
-# RHAIIS GPU Quickstart — Ask the running model a question
+# RHAII GPU Quickstart — Ask the running model a question
 # Looks up the served model via /v1/models, then sends your question to /v1/chat/completions.
 
 set -e
